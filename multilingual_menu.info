@@ -1,0 +1,7 @@
+name = Multilingual menu
+description = "Makes menus usable for multilingual sites."
+package = Translation
+type = module
+backdrop = 1.x
+version = 1.x-1.x-dev
+

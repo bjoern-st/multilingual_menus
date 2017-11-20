@@ -1,0 +1,161 @@
+<?php
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ * @param  array  &$form       Nested array of form elements that comprise the form.
+ * @param  array  &$form_state A keyed array containing the current state of the form.
+ * @param  string $form_id     String representing the name of the form itself.
+ * @return array               the altered form by reference
+ */
+function multilingual_menu_form_menu_edit_item_alter(&$form, &$form_state, $form_id) {
+
+  $default = '';
+  $item = $form['original_item']['#value'];
+  if (isset($item['options']['language'])) {
+    $default = $item['options']['language'];
+  }
+  $options = array('' => t('Language neutral'));
+  $language_list = language_list();
+  foreach ($language_list as $value) {
+    $options[$value->langcode] = $value->name;
+  }
+
+  $form['language_select'] = array(
+    '#type' => 'select',
+    '#title' => t('Language'),
+    '#default_value' => empty($default) ? '' : $default->langcode,
+    '#options' => $options,
+  );
+  $form['#submit'][] = 'multilingual_menu_form_menu_edit_item_submit';
+}
+
+
+/**
+ * Implements form_submit().
+ * @param  array  &$form       Nested array of form elements that comprise the form.
+ * @param  array  &$form_state A keyed array containing the current state of the form.
+ */
+function multilingual_menu_form_menu_edit_item_submit($form, $form_state) {
+  $values = $form_state['values'];
+
+  $item = $values['original_item'];
+  $language = $values['language_select'];
+
+  if (!empty($language)) {
+    $language_list = language_list('enabled');
+    if (isset($language_list[$language])) {
+      $item['options']['language'] = $language_list[$language];
+    }
+  }
+  else {
+    // remove language context if exists
+    if (isset($item['options']['language'])) {
+      unset($item['options']['language']);
+    }
+    if (isset($item['localized_options']['language'])) {
+      unset($item['localized_options']['language']);
+    }
+  }
+  menu_link_save($item);
+}
+
+
+/**
+ * Implements hook_theme_registry_alter().
+ */
+function multilingual_menu_theme_registry_alter(&$theme_registry) {
+  if (isset($theme_registry['menu_overview_form'])) {
+    $theme_registry['menu_overview_form']['function'] = 'multilingual_menu_menu_overview_form';
+    $theme_registry['menu_overview_form']['file'] = 'multilingual_menu.module';
+    $theme_registry['menu_overview_form']['theme path'] = backdrop_get_path('module', 'multilingual_menu');
+  }
+}
+
+/**
+ * Returns HTML for the menu overview form into a table.
+ *
+ * @param $variables
+ *   An associative array containing:
+ *   - form: A render element representing the form.
+ *
+ * @ingroup themeable
+ */
+function multilingual_menu_menu_overview_form($variables) {
+  $form = $variables['form'];
+
+  backdrop_add_tabledrag('menu-overview', 'match', 'parent', 'menu-plid', 'menu-plid', 'menu-mlid', TRUE, MENU_MAX_DEPTH - 1);
+  backdrop_add_tabledrag('menu-overview', 'order', 'sibling', 'menu-weight');
+
+  $header = array(
+    t('Menu link'),
+    t('Language'),
+    array('data' => t('Enabled'), 'class' => array('checkbox')),
+    t('Weight'),
+    t('Operations'),
+  );
+
+  $rows = array();
+  foreach (element_children($form) as $mlid) {
+    if (isset($form[$mlid]['hidden'])) {
+      $element = &$form[$mlid];
+
+      // Add special classes to be used for tabledrag.js.
+      $element['plid']['#attributes']['class'] = array('menu-plid');
+      $element['mlid']['#attributes']['class'] = array('menu-mlid');
+      $element['weight']['#attributes']['class'] = array('menu-weight');
+
+      // Change the parent field to a hidden. This allows any value but hides the field.
+      $element['plid']['#type'] = 'hidden';
+
+      $langcode = isset($element['#item']['options']['language']->name) ? $element['#item']['options']['language']->name : 'NONE';
+
+      $row = array();
+      $row[] = theme('indentation', array('size' => $element['#item']['depth'] - 1)) . backdrop_render($element['title']);
+      $row[] = $langcode;
+      $row[] = array('data' => backdrop_render($element['hidden']), 'class' => array('checkbox', 'menu-enabled'));
+      $row[] = backdrop_render($element['weight']) . backdrop_render($element['plid']) . backdrop_render($element['mlid']);
+      $row[] = backdrop_render($element['operations']);
+
+      $row = array_merge(array('data' => $row), $element['#attributes']);
+      $row['class'][] = 'draggable';
+      $rows[] = $row;
+    }
+  }
+  $output = '';
+  if (empty($rows)) {
+    $rows[] = array(array('data' => $form['#empty_text'], 'colspan' => '7'));
+  }
+  $output .= theme('table', array('header' => $header, 'rows' => $rows, 'attributes' => array('id' => 'menu-overview')));
+  $output .= backdrop_render_children($form);
+  return $output;
+}
+
+
+/**
+ * Implements hook_preprocess_HOOK for theme_preprocess_block
+ */
+function multilingual_menu_preprocess_block(&$variables) {
+  global $language;
+  $langcode = $language->langcode;
+
+  // fetch all custom menus
+  $user_menues = menu_get_menus(FALSE);
+  $user_menu_names = array_keys($user_menues);
+  // add the main menu because it is a system menu
+  $user_menu_names[] = 'main-menu';
+  foreach ($user_menu_names as $menu_name) {
+    $menu_name = str_replace('-', '_', $menu_name);
+    if (strpos($variables['theme_hook_original'], $menu_name) !== FALSE) {
+
+      foreach ($variables['content'] as $key => $value) {
+        if (isset($value['#localized_options'])) {
+          $options = $value['#localized_options'];
+
+          if (isset($options['language']) && ($options['language']->langcode != $langcode)) {
+            unset($variables['content'][$key]);
+          }
+        }
+      }
+    }
+  }
+}
